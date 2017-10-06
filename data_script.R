@@ -138,3 +138,128 @@ sample.description = function(rs,policy.year){
   sample = sample %>% select(country,n,age,pre.policy,post.policy,change)
   return(sample)
 }
+
+lead.lag = function(rs,year,type,gender,controls){
+  policy.year.original = year
+  m = lm(working ~ policy.introduced + treated +  
+           interaction +  country + bs(year, degree=2) + age_cat  ,
+         data = rs)
+  
+  cluster.se.original = cluster.se(m = m )
+  
+  ##Lead and lag effects
+  rs$policy.introduced <- NA
+  policy.year2 = policy.year.original + 2
+  rs$policy.introduced = ifelse(rs$year > policy.year2,1,0)
+  rs$interaction = rs$policy.introduced*rs$treated
+  m_lag = lm(working ~ policy.introduced + treated +  
+               interaction +  country + bs(year, degree=2) + age_cat,
+             data = rs)
+  cluster.se.plus2 = cluster.se(m = m_lag )
+  
+  rs$policy.introduced <- NA
+  policy.year3 = policy.year.original - 2
+  rs$policy.introduced = ifelse(rs$year > policy.year3 , 1,0)
+  rs$interaction = rs$policy.introduced*rs$treated
+  m_lead = lm(working ~ policy.introduced + treated +  
+                interaction +  country + bs(year, degree=2) + age_cat,
+              data = rs)
+  cluster.se.minus2 = cluster.se(m = m_lead)
+  
+  ##Generate matrix of results and plots
+  results.mat = matrix(,3,2,); 
+  colnames(results.mat) = c('coefficient','se')
+  rownames(results.mat) = c('lead','lag','original')
+  results.mat2 = matrix(,1,3,)
+  
+  estimateplus2 = round(cluster.se.plus2 ,4)['interaction','Estimate']; 
+  seplus2 = round(cluster.se.plus2 ,4)['interaction','Std. Error']
+  results.mat[1,1] = estimateplus2
+  results.mat[1,2] = seplus2
+  results.mat2[,1] <- paste(estimateplus2 , '[',
+                            paste(round(estimateplus2  - qnorm(0.975)*seplus2,3),
+                                  round(estimateplus2  + qnorm(0.975)*seplus2,3),sep=';'),
+                            ']',sep="")
+  
+  estimateminus2 = round(cluster.se.minus2, 4)['interaction','Estimate']
+  seminus2 = round(cluster.se.minus2, 4)['interaction','Std. Error']
+  results.mat[2,1] = estimateminus2 
+  results.mat[2,2] = seminus2
+  results.mat2[,2] <- paste(estimateminus2 , '[',
+                            paste(round(estimateminus2  - qnorm(0.975)*seminus2,3),
+                                  round(estimateminus2  + qnorm(0.975)*seminus2,3),sep=';'),
+                            ']',sep="")
+  
+  original = round(cluster.se.original,4)['interaction','Estimate']
+  se.original = round(cluster.se.original,4)['interaction','Std. Error']
+  results.mat[3,1] = original
+  results.mat[3,2] = se.original
+  results.mat2[,3] <- paste(original , '[',
+                            paste(round(original  - qnorm(0.975)*se.original,3),
+                                  round(original  + qnorm(0.975)*se.original,3),sep=';'),
+                            ']',sep="")
+  
+  model.names = c('3.t-plus2', '1.t-minus2', '2.Original')
+  results = data.frame(results.mat)
+  
+  
+  ggplot(results , aes(x=model.names, y=coefficient)) + 
+    geom_errorbar(aes(ymin=coefficient-(1.96*se), ymax=coefficient+(1.96*se)), width=.2) +
+    geom_line(size = 2) + geom_hline(yintercept = 0, color = 'darkgrey') +
+    geom_point() + coord_flip() + 
+    ylim(c(-0.15,0.15)) + theme(axis.text = element_text(size = 14)) +
+    ggtitle(paste(type, 'Results', '(', gender, ')', sep=" ")) +
+    theme(plot.caption = element_text(hjust=0.3, vjust=-0.1,size=15,family="serif" ),
+          axis.title = element_text(face="bold" )) +
+    labs(y='Estimate',x='Model',  
+         caption = paste('Controls=', toString(controls),sep=" "))
+  
+  ##Export plots to lead lag folder in working directory
+  ggsave(filename = paste(type,gender,'SA', '.tiff', sep=""), 
+         path = paste(getwd(),'/lead_lag', sep=""))
+  
+  ##Explort all results to working directory
+  write.table(results, file=paste(type,gender,'SA','.txt',sep=""),sep=",")
+  
+  return(results.mat2)
+  
+  
+}
+
+
+get.results.table = function(rs){
+  #Primary models
+  #model 1 - country fixed effects and SE clustered at mergeID level 
+  ##Cluster.se function for clustering SEs available in the data script
+  m1 = lm(working ~ policy.introduced + treated + interaction + country +
+            bs(year, degree=2), data = rs)
+  cluster.se1 = cluster.se(model = m1)
+  
+  #model2 - model 1 plus 10 year age category dummies 
+  m2 = lm(working ~ policy.introduced + treated +  
+            interaction +  country + bs(year, degree=2) + age_cat, data =rs)
+  cluster.se2 = cluster.se(model = m2)
+  
+  #Extract all results into an empty matrix
+  results.mat = matrix(,1,2,); colnames(results.mat) = c('base','adjusted')
+  se = cluster.se1['interaction','Std. Error']
+  estimate = round(cluster.se1,4)['interaction','Estimate']
+  results.mat[1,1] = paste(estimate, '[',
+                           paste(round(estimate - qnorm(0.975)*se,3),
+                                 round(estimate + qnorm(0.975)*se,3),sep=';'),
+                           ']',sep="")
+  estimate2 = round(cluster.se2,4)['interaction','Estimate']
+  se2 = cluster.se2['interaction','Std. Error']
+  results.mat[1,2] = paste(estimate2, '[',
+                           paste(round(estimate - qnorm(0.975)*se2,3),
+                                 round(estimate + qnorm(0.975)*se2,3),sep=';'), ']',sep="")
+  
+  #Export results
+  type = unique(rs[rs$treated==1,'country'])
+  gender = rs$gender[1]
+  write.table(results, file=paste(type,gender,'.txt',sep=""),sep=",")
+  
+  return(results.mat)
+  
+}
+
