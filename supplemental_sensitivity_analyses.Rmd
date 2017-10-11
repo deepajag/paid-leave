@@ -1,0 +1,173 @@
+---
+title: 'Supplemental File 2: Additional Sensitivity Analyses'
+output: word_document
+
+---
+
+```{r setup, echo = FALSE}
+setwd(getwd())
+knitr::opts_chunk$set(echo = FALSE)
+source('sa_data_script.R')
+theme_set(theme_bw(base_size=10))
+```
+
+
+##Different controls
+
+For each treated country, control countries were sequentially added according to the evidence that the trend was parallel to the treated country.  This evidence was based on an age-adjusted linear model where we tested for the significant of the interaction of country and year in the pre-policy period (with treated country as the reference), as described in detail in Supplemental File 1.
+
+While the final decision for controls also relied on visual inspection, countries with higher p-values on the coefficient for the ineraction term were considered better controls because there was less statistical evidence that their trend in the proportion working (i.e. the outcome) was significantly different than the trend in the treated country before the policy change.  In Figures 1 to 4, the order the countries were added are thus based on the absolute p-value.  The effect estimates remained robust across the removal/addition of different control countries, and only began to shift as the quality of the control group worsened.
+
+```{r different.controls}
+policy.year = c('1998','1998','2002','2002')
+type = c('Belgium','Belgium','Denmark','Denmark')
+gender = c('Female','Male','Male','Female')
+controls = list(belg.female2,belg.male2,den.male2,den.female2)
+ds.sample = ds
+control.plots = vector('list',4)
+
+for(i in 1:4){
+##'alternate controls' is a function to generate plots, available in 'sa_data_script.R'  
+control.plots[[i]] = 
+alternate.controls(type[i],controls[[i]],policy.year[i],gender[i],model.names[[i]])
+}
+
+control.plots[[1]]; control.plots[[2]]; control.plots[[3]]; control.plots[[4]]
+```
+
+
+##Non-linearity in pre-policy time trend
+
+The main control selection procedure assumed the the trend in proportion working in the pre-policy period was linear.  The trend in each treated group was thus tested for non-linearity using a simple linear regression of year and a square term for year on the proportion working, adjusting for age catgeory with standard errors clustered at the individual-level.  A 'chunk test', i.e. assessing the joint significant of both year terms, was used to determine the importance of the non-linear treand. Based on this test, we found some evidence that the trend in proportion working in the pre-policy period among females in Denmark was non-linear (p=0.02 for chunk test).  This was not the case for any other treatment groups. 
+
+
+We did not find another country or group of countries that experienced similar non-linearity to Denmark Females in the pre-policy period, and thus we could not identify a suitable countrol.  Instead, we completed alternate analyses using Denmark as a control for itself, comparing the trend in proportion working before and after the policy change, i.e. interrupted time series analysis.  The design is not as robust as the different-in-difference design that we used in the primary analysis because there is no control group, precluding measuring  observed changes in proportion working relative to what would have happened (as proxied by the counterfactual provided by a control group).  However, this additional analyses provided a basis against which to compare the primary results. We found that the policy effect shifted towards the null but did not alter our results.
+
+
+```{r tsanalysis}
+policy.year = 2002 #D 2002 #B 1998
+type = 'Denmark' #'Denmark' '#Belgium
+gender = 'Female' #'Female' #'Male'
+controls = den.female
+ds.sample = ds
+rs = get.data(type, controls, policy.year, gender=gender)
+
+den.female.sa = matrix(,2,3,);
+rownames(den.female.sa) = c('primary','self.ctrl');
+colnames(den.female.sa) = c('Estimate','SE','95% CI')
+
+m = lm(working ~ policy.introduced + treated +  
+         interaction +  country + bs(year, degree=2) + age_cat + eligible,
+       data = rs)
+m.se = cluster.se(model = m, cluster = rs[,'mergeid'])
+est = m.se['interaction','Estimate']
+se = m.se['interaction','Std. Error']
+den.female.sa[1,] = matrix(c(round(est,3) , round(se,3), paste(
+  round(est - qnorm(0.975)*se,3),
+  round(est + qnorm(0.975)*se,3), sep=";")), ncol = 3)
+
+m = lm(working ~  year + policy.introduced + 
+         year:policy.introduced + 
+         age_cat, data = rs[rs$country==type,])
+m.se = cluster.se(model = m, cluster = rs[rs$country==type,'mergeid'])
+est = m.se['year:policy.introduced','Estimate']
+se = m.se['year:policy.introduced','Std. Error']
+den.female.sa[2,] = matrix(c(round(est,3) , round(se,3), paste(
+  round(est - qnorm(0.975)*se,3),
+  round(est + qnorm(0.975)*se,3), sep=";")), ncol = 3)
+
+den.female.sa = noquote(den.female.sa)
+den.female.sa 
+```
+
+##Inclusion of legislated retirement age and restricting to non-retired population
+
+First, we included an indicator marking whether a subject was eligible for retirement in each year according to each country's retirement rules.  This information was available in the SHARE Job Episodes Panel.  Second, we included additional country-level information that influences the proportion working, and may also influence a country's decision to change their policy.  These included per capita national income, gross domestic product per capita (purchasing power parity) and the average labour force participation rates, which were extracted from the World Bank's World Development Indicators and Global Development Finance databases.  Addition of country-level variables did not alter our findings.
+
+```{r country.vars}
+policy.year = c(1998,1998,2002,2002) ##N 2001 #D 2002 #B 1998
+type = c('Belgium','Belgium','Denmark','Denmark') #'Denmark' '#Belgium
+gender = c('Female','Male','Female','Male')
+controls = list(belg.female,belg.male,den.female,den.male) 
+names = c('belg.fem', 'belg.male','den.fem', 'den.male')
+ds.sample = ds
+
+alternate.models =  matrix(,4,3,);
+rownames(alternate.models) = c('primary','m2','m3','m4');
+colnames(alternate.models) = c('Estimate','SE','95% CI')
+
+alternate.models.list = vector('list',4)
+names(alternate.models.list) = names
+
+mat.function = function(m.se){
+  est = m.se['interaction','Estimate']
+  se = m.se['interaction','Std. Error']
+  mat = matrix(c(round(est,3) , round(se,3), paste(
+    round(est - qnorm(0.975)*se,3),
+    round(est + qnorm(0.975)*se,3), sep=";")), ncol = 3)
+  return(mat)
+}
+
+for (i in 1:length(alternate.models.list)){
+  
+  rs = get.data(type = type[i], controls = controls[[i]], policy.year[i], gender=gender[i])
+  
+  m1 = lm(working ~ policy.introduced + treated +  
+            interaction +  country + bs(year, degree=2) + age_cat, 
+          data = rs)
+  cluster.se1 = cluster.se(model = m1)
+  
+  m2 = lm(working ~ policy.introduced + treated +  
+            interaction +  country + bs(year, degree=2) + age_cat + eligible, 
+          data = rs)
+  cluster.se2 = cluster.se(model = m2)
+  
+  m3 = lm(working ~ policy.introduced + treated +  
+            interaction +  country + bs(year, degree=2) + age_cat + lfpr + gdp.pc.ppp +
+            income.pc,  data = rs)
+  cluster.se3 = cluster.se(model = m3)
+  
+  m4 = lm(working ~ policy.introduced + treated +  
+            interaction +  country + bs(year, degree = 2),  data = rs[rs$retired==0,])
+  cluster.se4 = cluster.se(model = m4, cluster = rs[rs$retired==0,])
+  
+  
+  alternate.models[1,] <- mat.function(cluster.se1)
+  alternate.models[2,] <- mat.function(cluster.se2)
+  alternate.models[3,] <- mat.function(cluster.se3)
+  alternate.models[4,] <- mat.function(cluster.se4)
+  
+  alternate.models <- noquote(alternate.models)
+  
+  alternate.models.list[[i]] <- alternate.models
+  
+}
+
+alternate.models.list
+```
+
+##Sampling weights
+
+We redid the primary analysis with the cross-section individual-level sampling weights provided by SHARE.  Whether to include sampling weights is controversial for methods that aim to identify a causal effect because the aim is not usually to be representative, but rather the identify the effect.  This is contrast to, for example, descriptive analyses where the goal may be describe characteristics of the population and the sample is less of interest.  However, as people differ on this, this analysis considers whether including the weights affects our results. 
+
+SHARE provides two types of weights for individual - longitudinal and cross-sectional. The weights are full described elsewhere{SHARE, 2017, pg 34, 36}. Longitudinal weights allow for accounting for attrition across SHARE waves while cross-sectional weights reconstruct the population for a given wave.  We applied both types of weights (the longitudinal weights for waves 2-3 and the cross-sectional weights for wave 3) and re-estimated our main model. Inclusion of these weights did not affect our results. 
+
+```{r weights}
+policy.year = c(1998,1998,2002,2002) 
+type = c('Belgium','Belgium','Denmark','Denmark') 
+gender = c('Female','Male','Female','Male')
+controls = list(belg.female,belg.male,den.female,den.male) 
+names = c('belg.female', 'belg.male','den.female', 'den.male')
+ds.sample = ds
+
+weighted.analyses.list = vector('list',4); names(weighted.analyses.list) = names
+
+for (i in 1:length(weighted.analyses.list)){
+  
+  rs = get.data(type[i], controls[[i]], policy.year[i], gender[i])
+  weighted.analyses.list[[i]] <- weighted.analysis(rs = rs)
+}
+
+weighted.analyses.list
+```
+
