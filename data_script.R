@@ -16,6 +16,8 @@ set.seed(1234)
 ##Restrict data according to 1958 birth year and 1980 calendar year
 ds = read.dta13('share_jobepisodes_condensed1.dta')
 ds = ds[ds$yrbirth <= 1958 & ds$year >= 1990,]
+
+##Set theme for ggplot graphics
 theme_set(theme_bw(base_size=18))
 
 ##Import weight data
@@ -33,41 +35,31 @@ ds$age_cat = factor(ds$age_cat,
                     labels = c('less40','40.49','50.59','60.69','70+'))
 
 
-##Data set up for control selection
-get.data.controls= function(type, controls,policy.year, gender){
-  ds.sample$pre.policy = rep(0, nrow(ds.sample))
-  #Code pre-policy years as 1
-  ds.sample$pre.policy[ds.sample$year <= policy.year] <- 1 
-  restricted.sample = ds.sample[ds.sample$yrbirth <= 1958 & ds.sample$year >= 1980,]  
-  #Code treated country as 1
-  restricted.sample$treated = ifelse(restricted.sample$country==type, 1, 0) 
-  
-  restricted.sample$include.control = rep(0,nrow(restricted.sample))
-  #Code candidate controls as 1
-  restricted.sample$include.control[restricted.sample$country %in% controls] <- 1 
-  #New data restricting to candidate controls + treated country + gender + pre-policy years
-  rs = restricted.sample[restricted.sample$gender==gender & 
-                           (restricted.sample$include.control==1 | 
-                              restricted.sample$treated==1) & 
-                           restricted.sample$pre.policy==1,]
-  
-  return(rs)
-}
+##Final control Countries
+belg.male = c('Switzerland','France','Spain')
+belg.female = c('Italy','France','Greece')
+den.male = c('Greece')
+den.female = c('Austria')
+
 
 ##Data set up for primary analysis
 get.data= function(type, controls,policy.year, gender){
-    ds.sample$policy.introduced = rep(0, nrow(ds.sample))
-    ds.sample$policy.introduced[ds.sample$year > policy.year] <- 1 
-    restricted.sample = ds.sample[ds.sample$yrbirth <= 1958,]
-    restricted.sample$treated = ifelse(restricted.sample$country==type, 1, 0) 
+    ##Create dummy variables for pre/post policy period and control versus treated status
+    ds$policy.introduced = ifelse(ds$year > policy.year, 1, 0)
+    ds$treated = ifelse(ds$country==type, 1, 0) 
+    ds$include.control <- ifelse(ds$country %in% controls, 1, 0)
+
+    ##Create interaction terms
+    ds$interaction = ds$policy.introduced*ds$treated
+    ds$year2= ds$year*ds$year
     
-    restricted.sample$include.control = rep(0,nrow(restricted.sample))
-    restricted.sample$include.control[restricted.sample$country %in% controls] <- 1
-    restricted.sample$interaction = restricted.sample$policy.introduced*restricted.sample$treated
-    restricted.sample$year2= restricted.sample$year*restricted.sample$year
-    rs = restricted.sample[(restricted.sample$include.control==1 | 
-                          restricted.sample$treated==1) &
-                          restricted.sample$gender==gender,]
+    ##Place gender and year of birth restrictions on the sample
+    rs = ds[(ds$include.control==1 | ds$treated==1) &
+             ds$gender==gender &
+             ds$yrbirth <= 1958,]
+    
+    ##Modify variables to correct class, add retirement eligibility, and merge the World Bank data
+    rs$eligible <- ifelse(rs$age < rs$ret_age, 0, 1)
     rs$country = as.character(rs$country);
     rs$year = as.integer(rs$year)
     wb_final$country = as.character(wb_final$country);
@@ -75,10 +67,11 @@ get.data= function(type, controls,policy.year, gender){
     wb_final$gender = as.character(wb_final$gender); rs$gender = as.character(rs$gender)
     rs = left_join(rs, wb_final, by = c('country','year','gender'))
     
+    ##Change variable class again and specific reference factor level as treated country
     rs$country = as.factor(rs$country)
     rs$country = relevel(rs$country,type)
-    rs$eligible = rep(NA,nrow(rs))
-    rs$eligible <- ifelse(rs$age < rs$ret_age, 0, 1)
+    
+ 
     return(rs)
   }
 
@@ -91,22 +84,20 @@ cluster.se = function(model=m,cluster= rs[,'mergeid'] ){
 }
 
 
-##Final control Countries
-belg.male = c('Switzerland','France','Spain')
-belg.female = c('Italy','France','Greece')
-den.male = c('Greece')
-den.female = c('Austria')
 
 
 ##Function to generate sample description tables
 sample.description = function(rs,policy.year){
+  ##Sample sizes
   sample.size = rs %>% group_by(country,year) %>% summarise(count = n()) %>%
     group_by(country) %>% summarise(n = mean(count))
   
+  ##Mean age in 1990
   age = rs %>% filter(year=='1990') %>% 
     group_by(country) %>% 
     summarise(mean.age= mean(age),sd.age = sd(age)) 
   
+  ##Pre-policy working proportions
   work.pre.policy = rs %>% filter(year<policy.year) %>% 
     group_by(country,year) %>% 
     summarise(count = n(),working = sum(working)) %>%
@@ -114,6 +105,7 @@ sample.description = function(rs,policy.year){
     group_by(country) %>% 
     summarise(mean.pre.policy=mean(prop),sd.pre.policy=sd(prop))
   
+  ##Post-policy working proportions
   work.post.policy = rs %>% filter(year>policy.year) %>% 
     group_by(country,year) %>% 
     summarise(count = n(),working = sum(working)) %>%
@@ -121,6 +113,7 @@ sample.description = function(rs,policy.year){
     group_by(country) %>% 
     summarise(mean.post.policy=mean(prop),sd.post.policy=sd(prop))
   
+  ##Organize information into descriptives table
   sample = data.frame(cbind(sample.size,age,work.pre.policy,work.post.policy))
   sample$change = round(sample$mean.post.policy - 
                           sample$mean.pre.policy,2)
@@ -139,15 +132,54 @@ sample.description = function(rs,policy.year){
   return(sample)
 }
 
+##Function for primary analysis modelling
+get.results.table = function(rs){
+  #Primary models
+  #model 1 - country fixed effects and SE clustered at mergeID level 
+  ##Cluster.se function for clustering SEs available in the data script
+  m1 = lm(working ~ policy.introduced + treated + interaction + country +
+            bs(year, degree=2), data = rs)
+  cluster.se1 = cluster.se(model = m1)
+  
+  #model2 - model 1 plus 10 year age category dummies 
+  m2 = lm(working ~ policy.introduced + treated +  
+            interaction +  country + bs(year, degree=2) + age_cat, data =rs)
+  cluster.se2 = cluster.se(model = m2)
+  
+  #Extract all results into an empty matrix
+  results.mat = matrix(,1,2,); colnames(results.mat) = c('base','adjusted')
+  se = cluster.se1['interaction','Std. Error']
+  estimate = round(cluster.se1,4)['interaction','Estimate']
+  results.mat[1,1] = paste(estimate, '[',
+                           paste(round(estimate - qnorm(0.975)*se,2),
+                                 round(estimate + qnorm(0.975)*se,2),sep=';'),
+                           ']',sep="")
+  estimate2 = round(cluster.se2,4)['interaction','Estimate']
+  se2 = cluster.se2['interaction','Std. Error']
+  results.mat[1,2] = paste(estimate2, '[',
+                           paste(round(estimate2 - qnorm(0.975)*se2,2),
+                                 round(estimate2 + qnorm(0.975)*se2,2),sep=';'), ']',sep="")
+  
+  #Export results
+  type = unique(rs[rs$treated==1,'country'])
+  gender = rs$gender[1]
+  write.table(results, file=paste(type,gender,'.txt',sep=""),sep=",")
+  
+  return(results.mat)
+  
+}
+
+##########################MAIN SENSITIVITY ANALYSIS###########################
+##Function to estimate lead and lag effects
 lead.lag = function(rs,year,type,gender,controls){
+  ##Original year
   policy.year.original = year
   m = lm(working ~ policy.introduced + treated +  
            interaction +  country + bs(year, degree=2) + age_cat  ,
          data = rs)
+    cluster.se.original = cluster.se(m = m )
   
-  cluster.se.original = cluster.se(m = m )
-  
-  ##Lead and lag effects
+  ##Reset and move policy year to original+2
   rs$policy.introduced <- NA
   policy.year2 = policy.year.original + 2
   rs$policy.introduced = ifelse(rs$year > policy.year2,1,0)
@@ -157,6 +189,7 @@ lead.lag = function(rs,year,type,gender,controls){
              data = rs)
   cluster.se.plus2 = cluster.se(m = m_lag )
   
+  ##Reset and move policy year to original-2
   rs$policy.introduced <- NA
   policy.year3 = policy.year.original - 2
   rs$policy.introduced = ifelse(rs$year > policy.year3 , 1,0)
@@ -214,7 +247,8 @@ lead.lag = function(rs,year,type,gender,controls){
     labs(y='Estimate',x='Model',  
          caption = paste('Controls=', toString(controls),sep=" "))
   
-  ##Export plots to lead lag folder in working directory
+  ##Create lead lag folder in working directory
+  dir.create('lead_lag')
   ggsave(filename = paste(type,gender,'SA', '.tiff', sep=""), 
          path = paste(getwd(),'/lead_lag', sep=""))
   
@@ -226,42 +260,7 @@ lead.lag = function(rs,year,type,gender,controls){
   
 }
 
-
-get.results.table = function(rs){
-  #Primary models
-  #model 1 - country fixed effects and SE clustered at mergeID level 
-  ##Cluster.se function for clustering SEs available in the data script
-  m1 = lm(working ~ policy.introduced + treated + interaction + country +
-            bs(year, degree=2), data = rs)
-  cluster.se1 = cluster.se(model = m1)
-  
-  #model2 - model 1 plus 10 year age category dummies 
-  m2 = lm(working ~ policy.introduced + treated +  
-            interaction +  country + bs(year, degree=2) + age_cat, data =rs)
-  cluster.se2 = cluster.se(model = m2)
-  
-  #Extract all results into an empty matrix
-  results.mat = matrix(,1,2,); colnames(results.mat) = c('base','adjusted')
-  se = cluster.se1['interaction','Std. Error']
-  estimate = round(cluster.se1,4)['interaction','Estimate']
-  results.mat[1,1] = paste(estimate, '[',
-                           paste(round(estimate - qnorm(0.975)*se,2),
-                                 round(estimate + qnorm(0.975)*se,2),sep=';'),
-                           ']',sep="")
-  estimate2 = round(cluster.se2,4)['interaction','Estimate']
-  se2 = cluster.se2['interaction','Std. Error']
-  results.mat[1,2] = paste(estimate2, '[',
-                           paste(round(estimate2 - qnorm(0.975)*se2,2),
-                                 round(estimate2 + qnorm(0.975)*se2,2),sep=';'), ']',sep="")
-  
-  #Export results
-  type = unique(rs[rs$treated==1,'country'])
-  gender = rs$gender[1]
-  write.table(results, file=paste(type,gender,'.txt',sep=""),sep=",")
-  
-  return(results.mat)
-  
-}
+######################SUPPLEMENTAL SENSITIVITY ANALYSIS########################
 
 ####Alternate Controls####
 ###Control countries ordered by p-value indicating difference in trend in pre-policy period
@@ -299,7 +298,7 @@ model.names4 = c('1) Austria (MAIN)','2) 1+Germany','3) 2+France',
 model.names = list(model.names1,model.names2,model.names3,model.names4)
 control.plots = vector('list',4)
 
-###################Function to see estimate across diferent controls########################
+##Function to see estimate across diferent controls
 alternate.controls = function(type,controls,policy.year,gender,model.names.x){
   
   rs = get.data(type, controls, policy.year, gender=gender)
@@ -351,7 +350,7 @@ alternate.controls = function(type,controls,policy.year,gender,model.names.x){
 }
 
 
-##############FUNCTION TO RE-ESTIMATE EFFECT USING THE SAMPLING WEIGHTS###################
+##Function to re-estimate results using sampling weights
 weighted.analysis = function(rs){
   
   ##Join cross sectional and longitudinal weights
