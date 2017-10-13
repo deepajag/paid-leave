@@ -245,14 +245,14 @@ get.results.table = function(rs){
   se = cluster.se1['interaction','Std. Error']
   estimate = round(cluster.se1,4)['interaction','Estimate']
   results.mat[1,1] = paste(estimate, '[',
-                           paste(round(estimate - qnorm(0.975)*se,3),
-                                 round(estimate + qnorm(0.975)*se,3),sep=';'),
+                           paste(round(estimate - qnorm(0.975)*se,2),
+                                 round(estimate + qnorm(0.975)*se,2),sep=';'),
                            ']',sep="")
   estimate2 = round(cluster.se2,4)['interaction','Estimate']
   se2 = cluster.se2['interaction','Std. Error']
   results.mat[1,2] = paste(estimate2, '[',
-                           paste(round(estimate - qnorm(0.975)*se2,3),
-                                 round(estimate + qnorm(0.975)*se2,3),sep=';'), ']',sep="")
+                           paste(round(estimate2 - qnorm(0.975)*se2,2),
+                                 round(estimate2 + qnorm(0.975)*se2,2),sep=';'), ']',sep="")
   
   #Export results
   type = unique(rs[rs$treated==1,'country'])
@@ -263,3 +263,142 @@ get.results.table = function(rs){
   
 }
 
+####Alternate Controls####
+###Control countries ordered by p-value indicating difference in trend in pre-policy period
+#relative to treated country
+belg.male2 = c('France','Spain','Switzerland', 'Germany','Austria','
+               Czech Republic','Greece','Italy','Poland')
+den.male2 = c('Greece','Czech Republic','Spain','Switzerland','France',
+              'Germany',  'Austria','Italy', 'Poland')
+belg.female2 = c('France','Italy','Greece','Germany','Switzerland','Austria',
+                 'Spain', 'Czech Republic', 'Poland')
+den.female2 = c('Austria','Germany','France','Czech Republic','Greece',
+                'Italy','Switzerland','Poland','Spain')
+
+###Labels for plots
+#For Belgium female
+model.names1 = c('1) France','2) 1+Italy','3) 2+Greece (MAIN)', 
+                 '4) 3+Germany','5) 4+Switzerland', '6) 5+Austria','7) 6+Spain',
+                 '8) 7+Czech Republic','9) 8+Poland')
+
+#For Belgium male
+model.names2 = c('1) France','2) 1+Spain','3) 2+Switzerland (MAIN)',
+                 '4) 3+Germany','5) 4+Austria','6)  5+Czech Republic',
+                 '7) 6+Greece','8) 7+Italy','9) 8+Poland')
+
+#For Denmark male
+model.names3 = c('1) Greece (MAIN)','2) 1+Czech Republic','3) 2+Spain',
+                 '4) 3+Switzerland','5) 4+France','6)  5+Germany',
+                 '7) 6+Austria','8) 7+Italy','9) 8+Poland')
+
+#For Denmark female
+model.names4 = c('1) Austria (MAIN)','2) 1+Germany','3) 2+France',
+                 '4) 3+Czech Republic','5) 4+Greece','6)  5+Italy',
+                 '7) 6+Switzerland','8) 7+Poland','9) 8+Spain')
+
+model.names = list(model.names1,model.names2,model.names3,model.names4)
+control.plots = vector('list',4)
+
+###################Function to see estimate across diferent controls########################
+alternate.controls = function(type,controls,policy.year,gender,model.names.x){
+  
+  rs = get.data(type, controls, policy.year, gender=gender)
+  x <- controls
+  l <- paste(x)
+  
+  ##Matrix to store results
+  results.mat = matrix(,9,2,); colnames(results.mat) = c('coefficient','se')
+  
+  ##Loop to generate results for each combination of controls
+  for (j in 1:(length(belg.male2))){
+    rs2 = rs[rs$country %in% c(type,l[1:j]), ]   
+    
+    m = lm(working ~ policy.introduced + treated +  
+             interaction +  country + bs(year, degree=2) + age_cat,
+           data = rs2)
+    m.se = cluster.se(model = m, cluster = rs2[,'mergeid'])
+    
+    results.mat[j,1] = round(m.se ,4)['interaction','Estimate']
+    results.mat[j,2] = round(m.se ,4)['interaction','Std. Error']
+  }
+  
+  results = data.frame(results.mat)
+  
+  ##Numbers to create gradient marking quality on the plot
+  results$numbers = seq(0.1,0.9,by=0.1)
+  results$numbers = as.numeric(results$numbers)
+  results$model.names.x = model.names.x
+  
+  ##Final Plot
+  control.plot = 
+    ggplot(results , aes(x=model.names.x, y=coefficient, color = numbers)) + 
+    scale_color_continuous(low='black', high='lightgrey',
+                           name='Quality of \n control group',
+                           breaks = c(0.2),
+                           labels=c('Best')) +
+    geom_errorbar(aes(ymin=coefficient-(qnorm(0.975)*se), 
+                      ymax=coefficient+(qnorm(0.975)*se)), width=.2) +
+    geom_line(size = 2) + 
+    geom_hline(yintercept = 0, color = 'darkgrey') +
+    geom_point(size=2) + coord_flip() + 
+    ylim(c(-0.10,0.10)) + 
+    theme(axis.text = element_text(size = 10)) +
+    ggtitle(paste(type, 'Results', '(', gender, ')', sep=" ")) +
+    labs(y='Estimate',x='Model')
+  
+  return(control.plot)
+  
+}
+
+
+##############FUNCTION TO RE-ESTIMATE EFFECT USING THE SAMPLING WEIGHTS###################
+weighted.analysis = function(rs){
+  
+  ##Join cross sectional and longitudinal weights
+  cs.weights  = cs.weights %>% select(mergeid, cciw_w3)
+  long.weights  = long.weights %>% select(mergeid, cliw_c)
+  rs = left_join(rs, cs.weights)
+  rs = left_join(rs, long.weights)
+  
+  ##Re-run adjusted model with different types of weights and apply standarde error clustering function
+  m.longweight = lm(working ~ policy.introduced + treated +  
+                      interaction +  country + bs(year, degree=2) + 
+                      age_cat, data =rs, weights = cliw_c)
+  cluster.se.long = cluster.se(m.longweight)
+  
+  m.csweights = lm(working ~ policy.introduced + treated +  
+                     interaction +  country + bs(year, degree=2) + 
+                     age_cat, data =rs, weights = cciw_w3)
+  cluster.se.cs = cluster.se(m.csweights )
+  
+  
+  m.primary = lm(working ~ policy.introduced + treated +  
+                   interaction +  country + bs(year, degree=2) + 
+                   age_cat, data =rs)
+  cluster.se.1 = cluster.se(m.primary)
+  
+  ##Store results in a matrix to return
+  results.mat = matrix(,3,1,); rownames(results.mat) = c('primary','long.weights','cs.weights')
+  colnames(results.mat) = 'Estimate[95% CI]'
+  
+  estimate = round(cluster.se.1,4)['interaction','Estimate']
+  se = cluster.se.1['interaction','Std. Error']
+  results.mat[1,] = paste(estimate, '[',
+                          paste(round(estimate - qnorm(0.975)*se,3),
+                                round(estimate + qnorm(0.975)*se,3),sep=';'),
+                          ']',sep="")
+  estimate2 = round(cluster.se.long ,4)['interaction','Estimate']
+  se2 = cluster.se.long['interaction','Std. Error']
+  results.mat[2,] = paste(estimate2, '[',
+                          paste(round(estimate - qnorm(0.975)*se2,3),
+                                round(estimate + qnorm(0.975)*se2,3),sep=';'), ']',sep="")
+  estimate2 = round(cluster.se.cs,4)['interaction','Estimate']
+  se2 = cluster.se.cs['interaction','Std. Error']
+  results.mat[3,] = paste(estimate2, '[',
+                          paste(round(estimate - qnorm(0.975)*se2,3),
+                                round(estimate + qnorm(0.975)*se2,3),sep=';'), ']',sep="")
+  
+  results.mat = noquote(results.mat)
+  
+  return(results.mat)
+}
