@@ -1,10 +1,29 @@
 source('data_script.R')
+RStudio.version()
 
 ###Loop the functions over all treatment-control groups###
 policy.year =  c(1998,1998,2002,2002) 
 type = c('Belgium','Belgium','Denmark','Denmark') 
 gender = c('Female','Male','Female','Male')
 controls = list(belg.female,belg.male, den.female,den.male) 
+
+###Total sample sizes before/after restrictions
+total.elig = ds %>% filter(year==1990) %>% count()
+total.elig.gender = ds %>% filter(year==1990) %>% group_by(gender) %>% count()
+total.by = ds %>% filter(year==1990 & yrbirth <= 1958) %>% count()
+total.by.gender = ds %>% filter(year==1990 & yrbirth > 1958) %>% group_by(gender) %>% count()
+total.all.country = ds %>% filter(year==1990 & yrbirth <= 1958) %>% group_by(country) %>% count()
+total.elig.country = ds %>% 
+  filter(year==1990 & yrbirth <= 1958 & 
+           country != 'Netherlands' & 
+           country != 'Ireland' & 
+           country != 'Sweden') %>% count()
+total.elig.country.gender = ds %>% 
+  filter(year==1990 & yrbirth <= 1958 & 
+           country != 'Netherlands' & 
+           country != 'Ireland' & 
+           country != 'Sweden') %>% 
+  group_by(gender) %>% count()
 
 ###Table of descriptives
 samples.list = vector('list',4)
