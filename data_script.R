@@ -11,11 +11,9 @@ library(multiwayvcov)
 library(survey)
 
 source('world_bank_cleaning v2.R')
-set.seed(1234)
 
 ##Restrict data according to 1958 birth year and 1980 calendar year
 ds = read.dta13('share_jobepisodes_condensed1.dta')
-ds = ds[ds$yrbirth <= 1958 & ds$year >= 1990,]
 
 ##Set theme for ggplot graphics
 theme_set(theme_bw(base_size=18))
@@ -56,7 +54,8 @@ get.data= function(type, controls,policy.year, gender){
     ##Place gender and year of birth restrictions on the sample
     rs = ds[(ds$include.control==1 | ds$treated==1) &
              ds$gender==gender &
-             ds$yrbirth <= 1958,]
+             ds$yrbirth <= 1958 &
+             ds$year >= 1990,]
     
     ##Modify variables to correct class, add retirement eligibility, and merge the World Bank data
     rs$eligible <- ifelse(rs$age < rs$ret_age, 0, 1)
@@ -161,9 +160,9 @@ get.results.table = function(rs){
                                  round(estimate2 + qnorm(0.975)*se2,2),sep=';'), ']',sep="")
   
   #Export results
-  type = unique(rs[rs$treated==1,'country'])
-  gender = rs$gender[1]
-  write.table(results, file=paste(type,gender,'.txt',sep=""),sep=",")
+  #type = unique(rs[rs$treated==1,'country'])
+  #gender = rs$gender[1]
+  #write.table(results, file=paste(type,gender,'.txt',sep=""),sep=",")
   
   return(results.mat)
   
