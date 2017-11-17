@@ -1,14 +1,5 @@
 ##Load necessary packages
-library(readstata13)
-library(ggplot2)
-library(sandwich)
-library(lmtest)
-library(splines)
-library(plm)
-library(gridExtra)
-library(dplyr)
-library(multiwayvcov)
-library(survey)
+pacman::p_load(readstata13, ggplot2, sandwich, lmtest, splines, plm, gridExtra, dplyr, multiwayvcov, survey)
 
 source('world_bank_cleaning v2.R')
 
@@ -131,8 +122,54 @@ sample.description = function(rs,policy.year){
   return(sample)
 }
 
+sample.description.grouped = function(rs,policy.year){
+  ##Sample sizes
+  sample.size = rs %>% group_by(treated,year) %>% summarise(count = n()) %>%
+    group_by(treated) %>% summarise(n = mean(count))
+  
+  ##Mean age in 1990
+  age = rs %>% filter(year=='1990') %>% 
+    group_by(country,treated) %>% 
+    summarise(count=n(), age1 = mean(age),sd.age = sd(age)) %>% group_by(treated) %>% 
+    summarise(mean.age = weighted.mean(age1,count), sd.age = mean(sd.age)) 
+  
+  ##Pre-policy working proportions
+  work.pre.policy = rs %>% filter(year<policy.year) %>% 
+    group_by(treated,year) %>% 
+    summarise(count = n(),working = sum(working)) %>%
+    mutate(prop = working/count) %>% 
+    group_by(treated) %>% 
+    summarise(mean.pre.policy=mean(prop),sd.pre.policy=sd(prop))
+  
+  ##Post-policy working proportions
+  work.post.policy = rs %>% filter(year>policy.year) %>% 
+    group_by(treated,year) %>% 
+    summarise(count = n(),working = sum(working)) %>%
+    mutate(prop = working/count) %>% 
+    group_by(treated) %>% 
+    summarise(mean.post.policy=weighted.mean(prop),sd.post.policy=sd(prop))
+  
+  ##Organize information into descriptives table
+  sample = data.frame(cbind(sample.size,age,work.pre.policy,work.post.policy))
+  sample$change = round(sample$mean.post.policy - 
+                          sample$mean.pre.policy,2)
+  
+  sample$age = paste(round(sample$mean.age,2),
+                     "(", round(sample$sd.age,2),")", 
+                     sep="")
+  sample$pre.policy = paste(round(sample$mean.pre.policy ,2),
+                            "(", round(sample$sd.pre.policy,2),")", 
+                            sep="")
+  sample$post.policy =paste(round(sample$mean.post.policy ,2),
+                            "(", round(sample$sd.post.policy ,2),")", 
+                            sep="")
+  
+  sample = sample %>% select(treated,n,age,pre.policy,post.policy,change)
+  return(sample)
+}
+
 ##Function for primary analysis modelling
-get.results.table = function(rs){
+get.results.table = function(rs,l=100){
   #Primary models
   #model 1 - country fixed effects and SE clustered at mergeID level 
   ##Cluster.se function for clustering SEs available in the data script
@@ -148,16 +185,16 @@ get.results.table = function(rs){
   #Extract all results into an empty matrix
   results.mat = matrix(,1,2,); colnames(results.mat) = c('base','adjusted')
   se = cluster.se1['interaction','Std. Error']
-  estimate = round(cluster.se1,4)['interaction','Estimate']
-  results.mat[1,1] = paste(estimate, '[',
-                           paste(round(estimate - qnorm(0.975)*se,2),
-                                 round(estimate + qnorm(0.975)*se,2),sep=';'),
+  estimate = round(cluster.se1,3)['interaction','Estimate']
+  results.mat[1,1] = paste(estimate*l, '[',
+                           paste(round(estimate - qnorm(0.975)*se,3)*l,
+                                 round(estimate + qnorm(0.975)*se,3)*100,sep=';'),
                            ']',sep="")
-  estimate2 = round(cluster.se2,4)['interaction','Estimate']
+  estimate2 = round(cluster.se2,3)['interaction','Estimate']
   se2 = cluster.se2['interaction','Std. Error']
-  results.mat[1,2] = paste(estimate2, '[',
-                           paste(round(estimate2 - qnorm(0.975)*se2,2),
-                                 round(estimate2 + qnorm(0.975)*se2,2),sep=';'), ']',sep="")
+  results.mat[1,2] = paste(estimate2*l, '[',
+                           paste(round(estimate2 - qnorm(0.975)*se2,3)*l,
+                                 round(estimate2 + qnorm(0.975)*se2,3)*l,sep=';'), ']',sep="")
   
   #Export results
   #type = unique(rs[rs$treated==1,'country'])
@@ -170,13 +207,13 @@ get.results.table = function(rs){
 
 ##########################MAIN SENSITIVITY ANALYSIS###########################
 ##Function to estimate lead and lag effects
-lead.lag = function(rs,year,type,gender,controls){
+lead.lag = function(rs,year,type,gender,controls,l=100,a = -5, b=5){
   ##Original year
   policy.year.original = year
   m = lm(working ~ policy.introduced + treated +  
            interaction +  country + bs(year, degree=2) + age_cat  ,
          data = rs)
-    cluster.se.original = cluster.se(m = m )
+  cluster.se.original = cluster.se(m = m )
   
   ##Reset and move policy year to original+2
   rs$policy.introduced <- NA
@@ -208,42 +245,42 @@ lead.lag = function(rs,year,type,gender,controls){
   seplus2 = round(cluster.se.plus2 ,4)['interaction','Std. Error']
   results.mat[1,1] = estimateplus2
   results.mat[1,2] = seplus2
-  results.mat2[,1] <- paste(estimateplus2 , '[',
-                            paste(round(estimateplus2  - qnorm(0.975)*seplus2,3),
-                                  round(estimateplus2  + qnorm(0.975)*seplus2,3),sep=';'),
+  results.mat2[,1] <- paste(estimateplus2*l , '[',
+                            paste(round(estimateplus2  - qnorm(0.975)*seplus2,3)*l,
+                                  round(estimateplus2  + qnorm(0.975)*seplus2,3)*l,sep=';'),
                             ']',sep="")
   
   estimateminus2 = round(cluster.se.minus2, 4)['interaction','Estimate']
   seminus2 = round(cluster.se.minus2, 4)['interaction','Std. Error']
   results.mat[2,1] = estimateminus2 
   results.mat[2,2] = seminus2
-  results.mat2[,2] <- paste(estimateminus2 , '[',
-                            paste(round(estimateminus2  - qnorm(0.975)*seminus2,3),
-                                  round(estimateminus2  + qnorm(0.975)*seminus2,3),sep=';'),
+  results.mat2[,2] <- paste(estimateminus2*l , '[',
+                            paste(round(estimateminus2  - qnorm(0.975)*seminus2,3)*l,
+                                  round(estimateminus2  + qnorm(0.975)*seminus2,3)*l,sep=';'),
                             ']',sep="")
   
   original = round(cluster.se.original,4)['interaction','Estimate']
   se.original = round(cluster.se.original,4)['interaction','Std. Error']
   results.mat[3,1] = original
   results.mat[3,2] = se.original
-  results.mat2[,3] <- paste(original , '[',
-                            paste(round(original  - qnorm(0.975)*se.original,3),
-                                  round(original  + qnorm(0.975)*se.original,3),sep=';'),
+  results.mat2[,3] <- paste(original*l , '[',
+                            paste(round(original  - qnorm(0.975)*se.original,3)*l,
+                                  round(original  + qnorm(0.975)*se.original,3)*l,sep=';'),
                             ']',sep="")
   
   model.names = c('3.t-plus2', '1.t-minus2', '2.Original')
   results = data.frame(results.mat)
-  
+  results = results*l
   
   ggplot(results , aes(x=model.names, y=coefficient)) + 
     geom_errorbar(aes(ymin=coefficient-(1.96*se), ymax=coefficient+(1.96*se)), width=.2) +
     geom_line(size = 2) + geom_hline(yintercept = 0, color = 'darkgrey') +
-    geom_point() + coord_flip() + 
-    ylim(c(-0.15,0.15)) + theme(axis.text = element_text(size = 14)) +
+    geom_point() + coord_flip() + ylim(c(a,b)) +
+   theme(axis.text = element_text(size = 14)) +
     ggtitle(paste(type, 'Results', '(', gender, ')', sep=" ")) +
     theme(plot.caption = element_text(hjust=0.3, vjust=-0.1,size=15,family="serif" ),
           axis.title = element_text(face="bold" )) +
-    labs(y='Estimate',x='Model',  
+    labs(y='Percentage Point Difference',x='Model',  
          caption = paste('Controls=', toString(controls),sep=" "))
   
   ##Create lead lag folder in working directory
@@ -342,7 +379,7 @@ alternate.controls = function(type,controls,policy.year,gender,model.names.x){
     ylim(c(-0.10,0.10)) + 
     theme(axis.text = element_text(size = 10)) +
     ggtitle(paste(type, 'Results', '(', gender, ')', sep=" ")) +
-    labs(y='Estimate',x='Model')
+    labs(y='Proportion Difference',x='Model')
   
   return(control.plot)
   

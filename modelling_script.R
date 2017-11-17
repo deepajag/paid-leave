@@ -6,12 +6,26 @@ type = c('Belgium','Belgium','Denmark','Denmark')
 gender = c('Female','Male','Female','Male')
 controls = list(belg.female,belg.male, den.female,den.male) 
 
-###Table of descriptives
+###Table of descriptives - by country
 samples.list = vector('list',4)
 for (i in 1:4) {
   ds.sample = ds
   rs = get.data(type = type[i], controls = controls[[i]], policy.year[i], gender=gender[i])
   samples.list[[i]] <- sample.description(rs,policy.year = policy.year[i])
+}
+
+table1 = do.call(rbind,samples.list)
+write.csv(table1,file="table1-appendix.txt")
+
+###Table of descriptives - by treatment
+samples.list = vector('list',4)
+for (i in 1:4) {
+  ds.sample = ds
+  rs = get.data(type = type[i], controls = controls[[i]], policy.year[i], gender=gender[i])
+  x = sample.description.grouped(rs,policy.year = policy.year[i]) %>% arrange(-treated) %>% data.frame()
+  x$treated = ifelse(x$treat==1, paste(type[i],", ",gender[i],sep=""), "Controls")
+  samples.list[[i]] <- x
+  
 }
 
 table1 = do.call(rbind,samples.list)
