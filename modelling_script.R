@@ -1,5 +1,13 @@
 source('data_script.R')
 
+##Overall sample sizes
+total = ds %>% summarise(county=n_distinct(mergeid))
+by.exclusion = ds %>% filter(yrbirth <= 1958) %>% summarise(county=n_distinct(mergeid))
+country.exclusion = ds %>% filter(yrbirth <= 1958 & !country %in% c("Ireland", "Netherlands", "Sweden")) %>% summarise(county=n_distinct(mergeid))
+final.sample = ds %>% 
+  filter(yrbirth <= 1958 & !country %in% c("Ireland", "Netherlands", "Sweden")) %>% 
+  group_by(gender) %>% summarise(county=n_distinct(mergeid))
+
 ###Loop the functions over all treatment-control groups###
 policy.year =  c(1998,1998,2002,2002) 
 type = c('Belgium','Belgium','Denmark','Denmark') 
@@ -11,25 +19,30 @@ samples.list = vector('list',4)
 for (i in 1:4) {
   ds.sample = ds
   rs = get.data(type = type[i], controls = controls[[i]], policy.year[i], gender=gender[i])
-  samples.list[[i]] <- sample.description(rs,policy.year = policy.year[i])
+  x <- sample.description(rs,policy.year = policy.year[i])
+  x$treated = ifelse(x$country %in% type[i], 1, 0)
+  x$country = paste(x$country,", ",gender[i],sep="" )
+  samples.list[[i]] <- x
 }
 
 table1 = do.call(rbind,samples.list)
-write.csv(table1,file="table1-appendix.txt")
+write.csv(table1,file="table1-appendix.csv")
 
 ###Table of descriptives - by treatment
 samples.list = vector('list',4)
 for (i in 1:4) {
   ds.sample = ds
   rs = get.data(type = type[i], controls = controls[[i]], policy.year[i], gender=gender[i])
-  x = sample.description.grouped(rs,policy.year = policy.year[i]) %>% arrange(-treated) %>% data.frame()
+  x = sample.description.grouped(rs,
+                                 policy.year = policy.year[i]) %>% 
+  arrange(-treated) %>% data.frame()
   x$treated = ifelse(x$treat==1, paste(type[i],", ",gender[i],sep=""), "Controls")
   samples.list[[i]] <- x
   
 }
-
+i
 table1 = do.call(rbind,samples.list)
-write.csv(table1,file="table1.txt")
+write.csv(table1,file="table1.csv")
 
 ##Primary analysis
 all.results = matrix(,4,2,); colnames(all.results)=c('base','adjusted');

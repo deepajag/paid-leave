@@ -127,7 +127,7 @@ sample.description.grouped = function(rs,policy.year){
   sample.size = rs %>% group_by(treated,year) %>% summarise(count = n()) %>%
     group_by(treated) %>% summarise(n = mean(count))
   
-  ##Mean age in 1990
+   ##Mean age in 1990
   age = rs %>% filter(year=='1990') %>% 
     group_by(country,treated) %>% 
     summarise(count=n(), age1 = mean(age),sd.age = sd(age)) %>% group_by(treated) %>% 
@@ -153,7 +153,7 @@ sample.description.grouped = function(rs,policy.year){
   sample = data.frame(cbind(sample.size,age,work.pre.policy,work.post.policy))
   sample$change = round(sample$mean.post.policy - 
                           sample$mean.pre.policy,2)
-  
+
   sample$age = paste(round(sample$mean.age,2),
                      "(", round(sample$sd.age,2),")", 
                      sep="")
