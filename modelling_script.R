@@ -1,4 +1,4 @@
-source('data_script.R')
+load('paid-leave-data.Rdata')
 
 ##Overall sample sizes
 total = ds %>% summarise(county=n_distinct(mergeid))
