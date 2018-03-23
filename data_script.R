@@ -437,3 +437,5 @@ weighted.analysis = function(rs){
   
   return(results.mat)
 }
+
+save.image('paid-leave-data.RData')
